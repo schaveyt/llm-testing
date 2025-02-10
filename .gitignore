@@ -1,3 +1,6 @@
 .env
 venv/
 instruct_following/test_results.json
+instruct_following/test_results.csv
+instruct_following/test_results_detailed.csv
+instruct_following/test_results_summary.csv
