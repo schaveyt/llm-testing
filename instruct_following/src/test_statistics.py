@@ -4,11 +4,14 @@ from statistics import mean, stdev, median
 class TestStatistics:
     """Handles statistical calculations for test results"""
     @staticmethod
+    def is_test_successful(pass_data: dict) -> bool:
+        return (pass_data.get("validation") and 
+                pass_data["validation"].get("valid_xml") and 
+                not pass_data.get("error"))
+    
+    @staticmethod
     def calculate_success_rate(results: List[dict]) -> float:
-        successes = sum(1 for r in results 
-                       if r.get("validation") and 
-                       r["validation"].get("valid_xml") and 
-                       not r["error"])
+        successes = sum(1 for r in results if TestStatistics.is_test_successful(r))
         return successes / len(results) if results else 0.0
 
     @staticmethod

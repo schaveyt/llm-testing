@@ -28,7 +28,7 @@ class OpenRouterClient:
         payload = {
             "model": model,
             "messages": messages,
-            # "temperature": 0.2,
+            "temperature": 0.2,
             # "max_tokens": 1000
         }
         

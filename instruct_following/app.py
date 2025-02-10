@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
 from src.tool_tester import ToolCallTester
+from src.test_statistics import TestStatistics
 
 # Load environment variables from .env file
 load_dotenv()
@@ -159,25 +160,35 @@ def display_llm_responses(results):
                         with cols[0]:
                             if pass_data.get("error"):
                                 st.error(f"Pass {i}")
-                            elif pass_data.get("validation", {}).get("valid_xml", False):
+                            elif TestStatistics.is_test_successful(pass_data):
                                 st.success(f"Pass {i}")
                             else:
                                 st.warning(f"Pass {i}")
                         
                         with cols[1]:
-                            if pass_data.get("error"):
+                            if pass_data.get("error", None):
                                 st.error(pass_data["error"])
                             else:
                                 validation = pass_data.get("validation", {})
                                 if not validation.get("valid_xml", False):
                                     if validation.get("element_errors"):
-                                        st.error(f"Element errors: {', '.join(validation['element_errors'])}")
-                                    if validation.get("security_issues"):
-                                        st.error(f"Security issues: {', '.join(validation['security_issues'])}")
+                                        st.error("Element errors: The XML response contains structural issues. "
+                                                 f"Details: {', '.join(validation['element_errors'])}")
+                                if validation.get("content_errors"):
+                                    st.error("Content errors: The response content doesn't match expected patterns. "
+                                             f"Details: {', '.join(validation['content_errors'])}")
+                                if validation.get("security_issues"):
+                                    st.error("Security issues: The response contains potential security risks. "
+                                             f"Details: {', '.join(validation['security_issues'])}")
+                                if not validation.get("expected_elements_match"):
+                                    st.warning("Expected elements not found: The response is missing required XML elements.")
+                                if not validation.get("expected_pattern_match"):
+                                    st.warning("Pattern mismatch: The response doesn't match expected content patterns.")
                                 st.code(pass_data["response"], language="xml")
                 st.markdown("---")
 
-def display_results(results_df, raw_results=None):
+def display_test_results_charts(results_df):
+    """Display only the test results charts"""
     st.subheader("Test Results")
     
     # Success rate heatmap
@@ -193,7 +204,9 @@ def display_results(results_df, raw_results=None):
         height=400
     )
     st.plotly_chart(fig_success, use_container_width=True)
-    
+
+def display_response_time_comparison(results_df):
+    """Display response time comparison chart"""
     # Response time comparison
     fig_time = px.bar(
         results_df,
@@ -206,7 +219,8 @@ def display_results(results_df, raw_results=None):
     fig_time.update_layout(height=400)
     st.plotly_chart(fig_time, use_container_width=True)
     
-    # Detailed results table
+def display_detailed_results_table(results_df):
+    """Display detailed results table"""
     st.subheader("Detailed Results")
     # Format the dataframe without gradient
     results_df = results_df.round(3)
@@ -214,7 +228,6 @@ def display_results(results_df, raw_results=None):
     results_df['Avg Response Time'] = results_df['Avg Response Time'].map('{:.2f}s'.format)
     results_df['Response Time Stdev'] = results_df['Response Time Stdev'].map('{:.2f}s'.format)
     st.dataframe(results_df, use_container_width=True)
-    
 
 async def run_tests(tester=None):
     completed_tests = set()
@@ -286,8 +299,10 @@ def main():
             if st.session_state.results:
                 with st.session_state.results_placeholder.container():
                     results_df = create_results_dataframe(st.session_state.results)
-                    display_results(results_df, st.session_state.results)
                     display_llm_responses(st.session_state.results)
+                    display_test_results_charts(results_df)
+                    display_response_time_comparison(results_df)
+                    display_detailed_results_table(results_df)
         
         with col2:
             # Controls section
@@ -311,8 +326,11 @@ def main():
                     # Update results immediately
                     with st.session_state.results_placeholder.container():
                         results_df = create_results_dataframe(results)
-                        display_results(results_df, results)
+                        
+                        display_test_results_charts(results_df)
                         display_llm_responses(results)
+                        display_response_time_comparison(results_df)
+                        display_detailed_results_table(results_df)
             finally:
                 st.session_state.running = False
     except Exception as e:
