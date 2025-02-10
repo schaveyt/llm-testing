@@ -1,29 +1,18 @@
 import json
+import time
 import asyncio
 import os
-import time
-import signal
-import argparse
-import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Callable
+from typing import Dict, List, Optional, Callable
 from datetime import datetime
-from statistics import mean, stdev, median
-from dotenv import load_dotenv
-import aiohttp
-from concurrent.futures import TimeoutError
+import xml.etree.ElementTree as ET
 from rich.console import Console
+
+from src.api_client import OpenRouterClient, DEFAULT_TIMEOUT
+from src.test_statistics import TestStatistics
 
 # Initialize rich console for colored output
 console = Console()
-
-# Load environment variables from .env file
-load_dotenv()
-console.print("[green]Environment loaded[/green]")
-
-# Constants
-DEFAULT_TIMEOUT = 60  # seconds
-MAX_RETRIES = 3
 
 def load_system_prompt():
     """Load the system prompt from system_prompt.md file."""
@@ -31,75 +20,6 @@ def load_system_prompt():
         return f.read()
 
 SYSTEM_PROMPT = load_system_prompt()
-
-class OpenRouterClient:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        console.print(f"[blue]OpenRouterClient initialized with API key: {api_key[:4]}...[/blue]")
-        
-    async def generate(self, model: str, messages: list, timeout: int = DEFAULT_TIMEOUT) -> str:
-        console.print(f"[cyan]Generating response for model: {model}[/cyan]")
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": "https://github.com/your-username/your-repo",
-            "X-Title": "LLM Instruction Following Test Suite",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            # "temperature": 0.2,
-            # "max_tokens": 1000
-        }
-        
-        for attempt in range(MAX_RETRIES):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    console.print("[cyan]Making API request...[/cyan]")
-                    async with session.post(
-                        self.base_url,
-                        headers=headers,
-                        json=payload,
-                        timeout=timeout
-                    ) as response:
-                        response.raise_for_status()
-                        data = await response.json()
-                        console.print("[green]API response received[/green]")
-                        return data['choices'][0]['message']['content']
-            except TimeoutError:
-                if attempt == MAX_RETRIES - 1:
-                    raise
-                console.print(f"[yellow]Timeout occurred. Retrying ({attempt + 2}/{MAX_RETRIES})[/yellow]")
-                await asyncio.sleep(1)
-            except Exception as e:
-                if attempt == MAX_RETRIES - 1:
-                    console.print(f"[red]Error in generate: {str(e)}[/red]")
-                    raise
-                console.print(f"[yellow]Error occurred. Retrying ({attempt + 2}/{MAX_RETRIES})[/yellow]")
-                await asyncio.sleep(1)
-
-class TestStatistics:
-    """Handles statistical calculations for test results"""
-    @staticmethod
-    def calculate_success_rate(results: List[dict]) -> float:
-        successes = sum(1 for r in results 
-                       if r.get("validation") and 
-                       r["validation"].get("valid_xml") and 
-                       not r["error"])
-        return successes / len(results) if results else 0.0
-
-    @staticmethod
-    def calculate_response_times(results: List[dict]) -> Dict[str, float]:
-        times = [r.get("response_time", 0) for r in results]
-        return {
-            "mean": mean(times) if times else 0.0,
-            "median": median(times) if times else 0.0,
-            "stdev": stdev(times) if len(times) > 1 else 0.0,
-            "min": min(times) if times else 0.0,
-            "max": max(times) if times else 0.0
-        }
 
 class ToolCallTester:
     def __init__(self, test_matrix_path: str = "test_matrix.json", passes: int = 3, 
@@ -370,49 +290,3 @@ class ToolCallTester:
         console.print(f"  • {detailed_csv_path}")
         console.print(f"  • {summary_csv_path}")
         return self.results
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="LLM Instruction Following Test Suite")
-    parser.add_argument("--passes", "-p", type=int, default=3,
-                      help="Number of test passes to run (default: 3)")
-    parser.add_argument("--matrix", "-m", type=str, default="test_matrix.json",
-                      help="Path to test matrix JSON file (default: test_matrix.json)")
-    parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT,
-                      help=f"API request timeout in seconds (default: {DEFAULT_TIMEOUT})")
-    parser.add_argument("--output-dir", "-o", type=str, default=".",
-                      help="Directory to save result files (default: current directory)")
-    return parser.parse_args()
-
-def setup_signal_handlers():
-    def handle_interrupt(signum, frame):
-        console.print("\n[red]Interrupted by user. Cleaning up...[/red]")
-        raise KeyboardInterrupt()
-    
-    signal.signal(signal.SIGINT, handle_interrupt)
-
-if __name__ == "__main__":
-    try:
-        setup_signal_handlers()
-        args = parse_args()
-        
-        # Validate and create output directory
-        output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        console.print(f"\n[bold blue]LLM Instruction Following Test Suite[/bold blue]")
-        console.print(f"[blue]Running {args.passes} passes using test matrix: {args.matrix}[/blue]")
-        console.print(f"[blue]Results will be saved to: {output_dir}[/blue]")
-        
-        tester = ToolCallTester(
-            test_matrix_path=args.matrix,
-            passes=args.passes,
-            timeout=args.timeout,
-            output_dir=output_dir
-        )
-        asyncio.run(tester.run_all_tests())
-    except KeyboardInterrupt:
-        console.print("\n[red]Test run cancelled by user[/red]")
-        exit(1)
-    except Exception as e:
-        console.print(f"\n[red]Error: {str(e)}[/red]")
-        exit(1)

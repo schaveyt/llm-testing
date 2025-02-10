@@ -4,7 +4,11 @@ import pandas as pd
 import plotly.express as px
 import asyncio
 from pathlib import Path
-from test_llm_instruction_following import ToolCallTester
+from dotenv import load_dotenv
+from src.tool_tester import ToolCallTester
+
+# Load environment variables from .env file
+load_dotenv()
 
 st.set_page_config(
     page_title="LLM Testing Suite",
