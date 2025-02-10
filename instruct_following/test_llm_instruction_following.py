@@ -6,14 +6,13 @@ import signal
 import argparse
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Callable
 from datetime import datetime
 from statistics import mean, stdev, median
 from dotenv import load_dotenv
 import aiohttp
 from concurrent.futures import TimeoutError
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 
 # Initialize rich console for colored output
 console = Console()
@@ -101,7 +100,10 @@ class TestStatistics:
     """Handles statistical calculations for test results"""
     @staticmethod
     def calculate_success_rate(results: List[dict]) -> float:
-        successes = sum(1 for r in results if r["validation"]["valid_xml"] and not r["error"])
+        successes = sum(1 for r in results 
+                       if r.get("validation") and 
+                       r["validation"].get("valid_xml") and 
+                       not r["error"])
         return successes / len(results) if results else 0.0
 
     @staticmethod
@@ -249,14 +251,7 @@ class ToolCallTester:
 
         return validation_result
 
-    async def run_test_case(self, model: str, test_case: dict, pass_number: int, 
-                           progress: Progress) -> dict:
-        task_id = progress.add_task(
-            f"[cyan]Pass {pass_number}/{self.passes}: {model}",
-            total=None,
-            spinner="dots"
-        )
-        
+    async def run_test_case(self, model: str, test_case: dict, pass_number: int) -> dict:
         start_time = time.time()
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -275,11 +270,9 @@ class ToolCallTester:
                 "error": None,
                 "response_time": elapsed_time
             }
-            progress.update(task_id, completed=True, description=f"[green]✓ {model} ({elapsed_time:.2f}s)")
             return result
         except Exception as e:
             elapsed_time = time.time() - start_time
-            progress.update(task_id, completed=True, description=f"[red]✗ {model} ({elapsed_time:.2f}s)")
             return {
                 "pass_number": pass_number,
                 "model": model,
@@ -302,29 +295,21 @@ class ToolCallTester:
             "total_passes": len(model_results)
         }
 
-    async def run_all_tests(self):
+    async def run_all_tests(self, progress_callback: Optional[Callable[[str], None]] = None):
         console.print("\n[bold green]=== Starting Test Run ===[/bold green]")
-        
-        total_tests = len(self.test_matrix) * self.passes * len(self.models)
-        completed_tests = 0
         
         for i, test_case in enumerate(self.test_matrix):
             console.print(f"\n[bold cyan]Test Case {i+1}/{len(self.test_matrix)}: {test_case['description']}[/bold cyan]")
             
             for pass_num in range(1, self.passes + 1):
-                with Progress(
-                    SpinnerColumn(),
-                    *Progress.get_default_columns(),
-                    TimeElapsedColumn(),
-                    console=console,
-                    transient=True
-                ) as progress:
-                    results = await asyncio.gather(
-                        *[self.run_test_case(model, test_case, pass_num, progress) 
-                          for model in self.models]
-                    )
-                completed_tests += len(self.models)
-                console.print(f"Progress: {completed_tests}/{total_tests} tests completed")
+                results = await asyncio.gather(
+                    *[self.run_test_case(model, test_case, pass_num) 
+                      for model in self.models]
+                )
+                
+                if progress_callback:
+                    desc = f"Test {i+1}/{len(self.test_matrix)}, Pass {pass_num}/{self.passes}"
+                    progress_callback(desc)
                 
                 # Organize results by model
                 for result in results:
